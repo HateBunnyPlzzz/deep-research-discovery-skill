@@ -17,12 +17,13 @@ argument-hint: [research topic or question]
 
 > **Required dependencies:**
 >
-> **1. Superpowers plugin** (for parallel agent dispatch):
+> **1. Superpowers plugin** (includes brainstorming, parallel agents, writing-plans):
 > ```
 > /plugin marketplace add superpowers-marketplace/superpowers
 > /plugin install superpowers@superpowers-marketplace
 > ```
 > GitHub: https://github.com/obra/superpowers
+> *One install → all superpowers skills included*
 >
 > **2. Google AI Mode skill** (for claim verification):
 > ```bash
@@ -495,16 +496,22 @@ python scripts/run.py search.py --query "[Claim verification query] 2026" --save
 
 ## Skill Integration
 
-| Skill | Required | When | Purpose | Source |
-|-------|----------|------|---------|--------|
-| `superpowers:brainstorming` | **Strongly recommended** | BEFORE this skill | Scope the research question | superpowers plugin |
-| `superpowers:dispatching-parallel-agents` | **Yes** | Phase 2 | Parallel agent dispatch | superpowers plugin |
-| `google-ai-mode` | **Yes** | Phase 6 | Claim verification | Standalone skill |
-| `superpowers:writing-plans` | Optional | After Phase 6 | Create execution plan | superpowers plugin |
+### Required Installations (2 total)
 
-**Installation sources:**
-- superpowers plugin: https://github.com/obra/superpowers
-- google-ai-mode skill: https://github.com/PleasePrompto/google-ai-mode-skill
+| Install | What You Get | GitHub |
+|---------|--------------|--------|
+| **superpowers plugin** | All superpowers skills (brainstorming, parallel-agents, writing-plans, etc.) | [obra/superpowers](https://github.com/obra/superpowers) |
+| **google-ai-mode skill** | Claim verification via Google AI search | [PleasePrompto/google-ai-mode-skill](https://github.com/PleasePrompto/google-ai-mode-skill) |
+
+### Skills Used From Superpowers Plugin
+
+| Skill | When | Purpose |
+|-------|------|---------|
+| `superpowers:brainstorming` | BEFORE this skill | Scope the research question |
+| `superpowers:dispatching-parallel-agents` | Phase 2 | Parallel agent dispatch |
+| `superpowers:writing-plans` | After Phase 6 (optional) | Create execution plan |
+
+**Note:** Install the superpowers plugin once → all skills above are automatically available.
 
 See [Prerequisites](#prerequisites) for installation commands.
 

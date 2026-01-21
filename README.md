@@ -44,10 +44,13 @@ If you prefer manual installation, follow these steps in order:
 
 **GitHub:** https://github.com/obra/superpowers
 
-This provides:
+This single plugin includes ALL required superpowers skills:
 - `superpowers:brainstorming` - Scope research questions
 - `superpowers:dispatching-parallel-agents` - Parallel agent dispatch (Phase 2)
 - `superpowers:writing-plans` - Execution planning
+- And many more...
+
+**No need to install individual skills** - the plugin bundles everything.
 
 #### Step 2: Install Google AI Mode Skill (Required)
 
@@ -92,12 +95,20 @@ Claude should recognize and load the skill.
 
 ## Dependencies
 
-| Dependency | Required | Purpose | GitHub |
-|------------|----------|---------|--------|
-| `superpowers:brainstorming` | **Strongly recommended** | Scope research question BEFORE this skill | [obra/superpowers](https://github.com/obra/superpowers) |
-| `superpowers:dispatching-parallel-agents` | **Yes** | Parallel agent dispatch in Phase 2 | [obra/superpowers](https://github.com/obra/superpowers) |
-| `google-ai-mode` | **Yes** | Claim verification in Phase 6 | [PleasePrompto/google-ai-mode-skill](https://github.com/PleasePrompto/google-ai-mode-skill) |
-| `superpowers:writing-plans` | Optional | Execution planning after Phase 6 | [obra/superpowers](https://github.com/obra/superpowers) |
+| Dependency | Required | Purpose | Install |
+|------------|----------|---------|---------|
+| **superpowers plugin** | **Yes** | Provides brainstorming, parallel agents, writing-plans | One plugin install |
+| **google-ai-mode skill** | **Yes** | Claim verification in Phase 6 | Separate skill |
+
+### Skills Used (all included in superpowers plugin)
+
+| Skill | When Used | Purpose |
+|-------|-----------|---------|
+| `superpowers:brainstorming` | BEFORE this skill | Scope research question |
+| `superpowers:dispatching-parallel-agents` | Phase 2 | Parallel agent dispatch |
+| `superpowers:writing-plans` | After Phase 6 (optional) | Execution planning |
+
+**Install superpowers once → get all skills automatically.**
 
 ## Usage
 
