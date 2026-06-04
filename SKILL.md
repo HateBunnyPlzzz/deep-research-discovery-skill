@@ -2,64 +2,100 @@
 name: deep-research-discovery
 description: >
   Comprehensive research skill for literature surveys, state-of-the-art reviews, and strategic research decisions.
-  Use when: "research [topic]", "survey the literature on", "what is the current state of", "comprehensive overview of",
-  "explore the field of", "I need to understand [domain]", "SOTA methods for", "literature review on".
-  Gathers 50+ sources through parallel agents before synthesizing into actionable directions.
+  This skill should be used when the user wants to "research [topic]", "survey the literature on", "what is the
+  current state of", "comprehensive overview of", "explore the field of", "I need to understand [domain]",
+  "SOTA methods for", or "literature review on". It fans out parallel research agents to gather 50+ sources,
+  adversarially verifies key claims, synthesizes actionable directions, and persists the report to memory.
+  Runs natively on the current Claude Code harness — no external plugins required.
 argument-hint: [research topic or question]
-# Dependencies: Requires superpowers plugin (superpowers:dispatching-parallel-agents)
-# Install: /plugin marketplace add superpowers-marketplace/superpowers
-#          /plugin install superpowers@superpowers-marketplace
+version: 2.0.0
 ---
 
 # Deep Research Discovery
 
-## Prerequisites
+## What changed in v2.0.0 (native harness)
 
-> **Required dependencies:**
->
-> **1. Superpowers plugin** (includes brainstorming, parallel agents, writing-plans):
-> ```
-> /plugin marketplace add superpowers-marketplace/superpowers
-> /plugin install superpowers@superpowers-marketplace
-> ```
-> GitHub: https://github.com/obra/superpowers
-> *One install → all superpowers skills included*
->
-> **2. Google AI Mode skill** (for claim verification):
-> ```bash
-> git clone https://github.com/PleasePrompto/google-ai-mode-skill.git ~/.claude/skills/google-ai-mode
-> ```
-> GitHub: https://github.com/PleasePrompto/google-ai-mode-skill
+This skill used to depend on the **superpowers** plugin (for parallel-agent dispatch) and the
+**google-ai-mode** Python skill (for claim verification). Both dependencies are **removed**. The skill
+now runs entirely on first-party Claude Code capabilities:
+
+| Old dependency | Replaced by (native harness) |
+|----------------|------------------------------|
+| `superpowers:brainstorming` | `AskUserQuestion` for scoping (Phase 0) |
+| `superpowers:dispatching-parallel-agents` + `Task` tool | The `Agent` tool (parallel subagents) or the `Workflow` tool (deterministic fan-out) |
+| `google-ai-mode` Python script (Google search + CAPTCHA) | Built-in `WebSearch` + `WebFetch` verifier agents (Phase 6) |
+| Ad-hoc notes lost at session end | **File-based memory** — report persisted for recall in future sessions (Phase 7) |
+
+This skill also actively uses three newer harness features described below: **dynamic workflows**,
+**shared agent memory**, and **persistent memory**.
+
+## Harness features this skill relies on
+
+### 1. The `Agent` tool (parallel subagents)
+Spawn subagents with `subagent_type`. The useful types here:
+- `general-purpose` — runs WebSearch/WebFetch, gathers and summarizes sources. The workhorse for Phase 2 and Phase 6.
+- `Explore` — fast read-only lookups (use only if research touches a local codebase).
+
+**Parallel rule:** to run agents concurrently, put **multiple `Agent` calls in a single assistant
+message**. Sequential calls do NOT parallelize. Each agent's final message is returned to the
+orchestrator as the tool result — it is not shown to the user, so instruct agents to return raw
+structured data (source tables), not prose for a human.
+
+### 2. Dynamic workflows (the `Workflow` tool) — PREFERRED for the full run
+For a comprehensive run, prefer a single `Workflow` over hand-dispatched agents. A workflow script
+gives deterministic control flow — fan-out, loop-until-count, and a verify pipeline — in one
+orchestrated unit, and reports live progress. Use `pipeline()` so each gathered cluster flows into
+dedup/verify without waiting for the slowest sibling, and `parallel()` only when you genuinely need
+all results at once (e.g. dedup across the full source set). See "Phase 2 — Workflow mode" below.
+
+> **Opt-in:** the `Workflow` tool requires explicit user opt-in (e.g. the user said "use a workflow",
+> "ultracode", or invoked this skill knowing it orchestrates agents). Invoking this skill counts as
+> asking for multi-agent research, so a workflow IS appropriate here. If you are unsure the user wants
+> the scale, fall back to hand-dispatched `Agent` calls (Phase 2 — Agent mode) instead.
+
+### 3. Shared agent memory (a shared research workspace)
+Subagents do not see each other's context. To make them collaborate, give every dispatched agent a
+**shared workspace directory** and have each one APPEND its findings there. This is the skill's
+"shared agent memory":
+
+```
+.deep-research/<topic-slug>/
+├── sources/        # each agent writes sources-<agent>.md (URL | title | finding | category)
+├── synthesis.md    # orchestrator's merged knowledge structure
+└── claims.md       # extracted claims + verification verdicts
+```
+
+Tell each gathering agent: *"Append every source you find to
+`.deep-research/<slug>/sources/sources-<your-cluster>.md` as a markdown table row before returning."*
+The orchestrator then reads the whole `sources/` directory to dedup and count — nothing is lost if an
+agent's return message is truncated, and a re-run can resume from what is already on disk.
+
+Also pass relevant **recalled memories** (see Phase 7) into agent prompts so agents share prior-session
+context, not just this run's.
+
+### 4. Persistent memory (Phase 7)
+At the end, write the finished report (or a pointer to it) into the project memory directory and add a
+one-line index entry to `MEMORY.md`. Future sessions recall it instead of re-researching. Before
+starting a new run, check `MEMORY.md` for prior research on the same topic and build on it.
 
 ## Recommended Workflow
 
-**Always invoke `superpowers:brainstorming` BEFORE this skill.**
-
 ```
-1. /superpowers:brainstorming  →  Scope the research question
-2. /deep-research-discovery    →  Gather 50+ sources + verify claims (this skill)
-3. /superpowers:writing-plans  →  Create execution plan (optional)
+1. Phase 0: Scope         → AskUserQuestion (clarify the question first)
+2. Phases 1-5: Research   → decompose → gather (50+) → synthesize → directions → crystallize
+3. Phase 6: Verify        → WebSearch/WebFetch adversarial verification of critical claims
+4. Phase 7: Persist       → save report to memory for future recall
 ```
 
-**This skill now includes automatic claim verification using Google AI Mode in Phase 6.**
-
-**Why brainstorm first?**
-- Clarifies what you actually need to research
-- Prevents wasted effort gathering sources for the wrong question
-- Identifies constraints, assumptions, and success criteria
-- Narrows scope before committing to comprehensive gathering
-
-**Do NOT skip brainstorming** thinking "I know what I want to research." The brainstorming phase often reveals:
-- Hidden assumptions worth questioning
-- Adjacent questions worth including
-- Scope creep to avoid
-- Success criteria to validate against
+**Do NOT skip scoping** thinking "I know what I want to research." Scoping reveals hidden assumptions,
+adjacent questions worth including, scope creep to avoid, and success criteria to validate against.
 
 ## Overview
 
-Comprehensive research requiring **50+ sources minimum** through systematic parallel gathering, then narrowing to actionable directions.
+Comprehensive research requiring **50+ sources minimum** through systematic parallel gathering, then
+narrowing to verified, actionable directions.
 
-**Core principle:** Breadth before depth. Gather comprehensively, then narrow systematically.
+**Core principle:** Breadth before depth. Gather comprehensively, verify claims, then narrow systematically.
 
 **Announce:** "Using deep-research-discovery to comprehensively explore [topic]."
 
@@ -70,21 +106,22 @@ Comprehensive research requiring **50+ sources minimum** through systematic para
 - Strategic decisions requiring comprehensive information
 - Understanding landscape before committing to direction
 
-**Don't use for:** Quick lookups, single-source answers, implementation tasks
+**Don't use for:** Quick lookups, single-source answers, implementation tasks.
 
-## The Iron Law
+## The Iron Laws
 
 ```
-NO RESEARCH COMPLETE WITHOUT 50+ SOURCES
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  NO RESEARCH COMPLETE WITHOUT 50+ SOURCES  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  NO CRITICAL CLAIM ACCEPTED WITHOUT VERIFY ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-**No exceptions:**
-- Not for "simple topics"
-- Not for "I found good sources already"
-- Not for "time pressure"
-- Not for "the user seems satisfied"
-
-If you haven't gathered 50+ sources, you haven't done comprehensive research.
+**No exceptions** to the source count: not for "simple topics", not for "I found good sources already",
+not for "time pressure", not for "the user seems satisfied". If you haven't gathered 50+ sources, you
+haven't done comprehensive research.
 
 ## Red Flags - STOP If You Think These
 
@@ -93,56 +130,60 @@ If you haven't gathered 50+ sources, you haven't done comprehensive research.
 | "I have enough sources" | Count them. Is it 50+? No? Keep going. |
 | "These 10 sources are high quality" | Quality AND quantity. 50+ minimum. |
 | "Time to synthesize" | Did you dispatch parallel agents? Did you hit 50+? |
-| "The user wants it fast" | Fast ≠ shallow. Parallel agents ARE fast. |
+| "The user wants it fast" | Fast ≠ shallow. Parallel agents/workflows ARE fast. |
 | "I already know this domain" | Training data ≠ current state. Research anyway. |
-| "More sources won't add value" | You can't know this without gathering them first. |
-| "I'll search sequentially first" | NO. Dispatch all agents in parallel. Single message. |
+| "I'll search sequentially first" | NO. Dispatch all agents in ONE message, or use a Workflow. |
 | "Let me do a quick search first" | Decompose queries BEFORE any searching. |
-| "The topic is narrow" | Narrow topics still have 50+ relevant sources. Find them. |
-| "I found what the user needs" | You don't know what you're missing. Hit 50+. |
+| "I'll trust my sources for the claims" | Critical claims get independent WebSearch verification. |
+| "I'll save the report later" | Persist to memory in Phase 7 — later = never. |
 
 ## Process Flow
 
 ```dot
 digraph research_flow {
-    rankdir=TB;
-    node [shape=box];
+    rankdir=TB; node [shape=box];
+    start    [label="Research Request" shape=ellipse];
+    recall   [label="Phase 0a: Recall\ncheck MEMORY.md"];
+    scope    [label="Phase 0b: Scope\nAskUserQuestion"];
+    decompose[label="Phase 1: Decompose\n20-50 queries"];
+    dispatch [label="Phase 2: Gather\nWorkflow OR parallel Agents\n→ shared workspace"];
+    count    [label="50+ sources?" shape=diamond];
+    more     [label="Dispatch more agents"];
+    synth    [label="Phase 3: Synthesize"];
+    dirs     [label="Phase 4: Directions\n3-5 options + matrix"];
+    pick     [label="USER DECISION\nWhich direction?" shape=diamond style=bold];
+    cryst    [label="Phase 5: Crystallize"];
+    verify   [label="Phase 6: Verify\nWebSearch/WebFetch agents" style=bold];
+    persist  [label="Phase 7: Persist\nwrite to memory" style=bold];
+    done     [label="Complete" shape=ellipse];
 
-    start [label="Research Request" shape=ellipse];
-    decompose [label="Phase 1: Decompose\n20-50 queries"];
-    dispatch [label="Phase 2: Dispatch\n5-10 parallel agents"];
-    count_check [label="50+ sources?" shape=diamond];
-    more_agents [label="Dispatch more agents"];
-    synthesize [label="Phase 3: Synthesize\nKnowledge structure"];
-    directions [label="Phase 4: Directions\n3-5 options + matrix"];
-    user_checkpoint [label="USER DECISION\nWhich direction?" shape=diamond style=bold];
-    crystallize [label="Phase 5: Crystallize\nActionable proposal"];
-    verify [label="Phase 6: Verify\nGoogle AI Mode" style=bold];
-    done [label="Complete" shape=ellipse];
-
-    start -> decompose;
-    decompose -> dispatch;
-    dispatch -> count_check;
-    count_check -> more_agents [label="No"];
-    more_agents -> count_check;
-    count_check -> synthesize [label="Yes, 50+"];
-    synthesize -> directions;
-    directions -> user_checkpoint;
-    user_checkpoint -> crystallize [label="User chooses"];
-    crystallize -> verify;
-    verify -> done;
+    start -> recall -> scope -> decompose -> dispatch -> count;
+    count -> more [label="No"]; more -> count;
+    count -> synth [label="Yes, 50+"];
+    synth -> dirs -> pick -> cryst [label="User chooses"];
+    cryst -> verify -> persist -> done;
 }
 ```
+
+## Phase 0: Recall + Scope
+
+**0a. Recall.** Read the project `MEMORY.md` index. If a prior research report on this topic (or an
+adjacent one) exists, load it and tell the user — build on it instead of starting from zero.
+
+**0b. Scope.** Unless the question is already specific, use `AskUserQuestion` to narrow it before
+committing to a full gather. Good scoping questions cover: depth/breadth, time horizon (latest only vs.
+historical), domain constraints (region, framework, license), and what decision the research will
+inform. Weave the answers into Phase 1 queries.
 
 ## Phase 1: Query Decomposition (20-50 queries)
 
 Generate diverse queries BEFORE searching. Output the full list.
 
-**Perspectives:** Academic, practitioner, critic, beginner, adjacent expert, skeptic
+**Perspectives:** Academic, practitioner, critic, beginner, adjacent expert, skeptic.
 
 **Categories (3-5 queries each):**
 - Foundational: "What is [X]", "[X] overview", "[X] fundamentals"
-- State-of-the-art: "[X] 2024 2025", "latest [X] research", "recent advances"
+- State-of-the-art: "[X] 2025 2026", "latest [X] research", "recent advances"
 - Methods: "[X] techniques", "how to [X]", "[X] algorithms"
 - Comparisons: "[X] vs [Y]", "[X] alternatives", "best [X] approach"
 - Problems: "[X] challenges", "[X] limitations", "[X] failures"
@@ -153,17 +194,10 @@ Generate diverse queries BEFORE searching. Output the full list.
 **Output format:**
 ```
 ## Query Decomposition (N queries)
-
 ### Foundational (N)
-1. query
-2. query
-...
-
+1. query …
 ### State-of-the-art (N)
-...
-
-[Continue all categories]
-
+…
 Total: [COUNT] queries
 ```
 
@@ -172,137 +206,120 @@ Total: [COUNT] queries
 ## Phase 2: Parallel Source Gathering (50+ sources)
 
 ### The Second Iron Law
-
 ```
-ALL AGENTS DISPATCHED IN A SINGLE MESSAGE
+ALL AGENTS DISPATCHED CONCURRENTLY — never one-at-a-time
 ```
+Concurrency comes from either (a) multiple `Agent` calls in ONE message, or (b) a `Workflow` that
+fans out internally. Both are valid; pick one mode and commit.
 
-**No exceptions:**
-- Not "I'll dispatch one first to see"
-- Not "sequential is more controlled"
-- Not "I'll parallelize the next batch"
-
-### How to Dispatch (MANDATORY)
-
-Use the Task tool **5-10 times in ONE message**. Each agent searches different query clusters:
-
-```
-<message with multiple Task calls>
-  Task 1: Queries 1-8 (Core methods)
-  Task 2: Queries 9-14 (Sim-to-real)
-  Task 3: Queries 15-22 (Multi-task & vision)
-  Task 4: Queries 23-30 (Specific challenges)
-  Task 5: Queries 31-40 (Efficiency & SOTA)
-  Task 6: Queries 41-50 (Benchmarks & tools)
-</message>
+First create the shared workspace:
+```bash
+mkdir -p .deep-research/<topic-slug>/sources
 ```
 
-**Each subagent prompt:**
+### Phase 2 — Workflow mode (preferred for full runs)
+
+Author a `Workflow` that fans out one agent per query cluster, has each agent write to the shared
+workspace, then pipelines gathered clusters straight into dedup. Sketch:
+
+```js
+export const meta = {
+  name: 'deep-research-gather',
+  description: 'Fan out research agents over query clusters, gather 50+ sources, dedup',
+  phases: [{ title: 'Gather' }, { title: 'Dedup' }],
+}
+const CLUSTERS = args.clusters // [{label, queries:[...]}] passed in via Workflow args
+const SOURCE_SCHEMA = {
+  type: 'object',
+  properties: {
+    sources: { type: 'array', items: {
+      type: 'object',
+      properties: { url:{type:'string'}, title:{type:'string'}, finding:{type:'string'}, category:{type:'string'} },
+      required: ['url','title','finding','category'],
+    }},
+  },
+  required: ['sources'],
+}
+const gathered = await parallel(CLUSTERS.map((c, i) => () =>
+  agent(
+    `Research these queries with WebSearch, then WebFetch the most promising results:\n` +
+    c.queries.map((q,n)=>`${n+1}. ${q}`).join('\n') +
+    `\n\nFor EACH query gather 5-10 sources. Prioritize recent (2025-2026), authoritative, technical. ` +
+    `Skip paywalled, duplicate, marketing pages. Append every source as a markdown table row to ` +
+    `.deep-research/${args.slug}/sources/sources-${i}.md, THEN return them. Target 15-25 sources.`,
+    { label: `gather:${c.label}`, phase: 'Gather', schema: SOURCE_SCHEMA }
+  )
+))
+const all = gathered.filter(Boolean).flatMap(r => r.sources)
+const deduped = Array.from(new Map(all.map(s => [s.url, s])).values()) // barrier-free dedup in plain JS
+return { count: deduped.length, sources: deduped }
 ```
-Research these queries comprehensively:
+
+If `count < 50`, run the workflow again with additional refined clusters (loop until ≥50). The skill's
+50-source law is enforced by you, the orchestrator, not by the workflow.
+
+### Phase 2 — Agent mode (fallback, no workflow)
+
+Use the `Agent` tool 5-10 times in **one message**, each `general-purpose`, each owning a query cluster.
+Each agent prompt:
+
+```
+Research these queries comprehensively using WebSearch and WebFetch:
 [query list]
 
 For EACH query:
-- Execute web search
-- Gather 5-10 relevant sources per query
-- Extract: URL, title, 2-3 sentence key findings
-- Prioritize: recent (2024-2025), authoritative, technical
+- Run WebSearch, then WebFetch the most promising 5-10 results for full content
+- Extract: URL, title, 2-3 sentence key finding, category
+- Prioritize: recent (2025-2026), authoritative, technical
 - Skip: paywalled, duplicates, marketing fluff
+- APPEND each source as a table row to .deep-research/<slug>/sources/sources-<cluster>.md
 
-Return ALL sources in structured format with count.
-Target: 15-25 sources from your query set.
+Return ALL sources as a structured table with a count. Target: 15-25 sources.
 ```
 
-### Parallelization Red Flags
+### After ALL agents/the workflow return
+1. Read the whole `.deep-research/<slug>/sources/` directory and count total **unique** sources (dedup by URL).
+2. If < 50: dispatch MORE parallel agents / re-run the workflow with refined queries.
+3. Deep-fetch (WebFetch) the top 30-50 most relevant for full content.
 
-| Thought | Reality |
-|---------|---------|
-| "I'll start with one agent" | NO. Dispatch ALL agents in ONE message. |
-| "Sequential gives more control" | Parallel is faster AND more thorough. |
-| "Let me see what the first agent finds" | You're stalling. Dispatch all now. |
-| "I can parallelize later" | Later = never. Do it now. |
-
-### After ALL Agents Return
-
-1. Count total unique sources
-2. If < 50: dispatch MORE parallel agents with refined queries
-3. Deep-fetch top 30-50 most relevant for full content
-
-**Source Tracking Table:**
+**Source Tracking Table** (merge into `synthesis.md`):
 ```
-| # | Source | Key Finding | Category |
-|---|--------|-------------|----------|
-| 1 | URL    | Finding     | Category |
-...
-| 50+ | ...  | ...         | ...      |
+| # | Source (URL) | Key Finding | Category |
+|---|--------------|-------------|----------|
 ```
 
-**Checkpoint:** Do not proceed to synthesis until source count >= 50.
+**Checkpoint:** Do not proceed to synthesis until unique source count >= 50. State it explicitly:
+"Sources gathered: N".
 
 ## Phase 3: Content Synthesis
 
-Build knowledge structure from 50+ sources:
+Build the knowledge structure from 50+ sources and write it to `.deep-research/<slug>/synthesis.md`:
 
 ```
 ## Domain: [X]
-
-### Core Concepts
-- Concept 1 [sources: #3, #15, #42]
-- Concept 2 [sources: #7, #23]
-
-### Current Methods (with tradeoffs)
-| Method | Pros | Cons | Sources |
-|--------|------|------|---------|
-
+### Core Concepts        — concept [sources: #3, #15, #42]
+### Current Methods      — table: Method | Pros | Cons | Sources
 ### Key Benchmarks & Metrics
-- Benchmark 1: description [source]
-
-### Open Challenges
-- Challenge 1 [sources disagree: #12 vs #34]
-
-### Recent Breakthroughs (2024-2025)
-- Breakthrough [sources: #...]
-
-### Key Players
-- Labs: ...
-- Companies: ...
-- Researchers: ...
-
-### Contradictions Found
-- Topic: Source #X says A, Source #Y says B
+### Open Challenges       — note where sources disagree (#12 vs #34)
+### Recent Breakthroughs (2025-2026)
+### Key Players           — labs / companies / researchers
+### Contradictions Found  — Source #X says A, Source #Y says B
 ```
 
 ## Phase 4: Direction Identification
 
-Extract 3-5 actionable directions. Present as comparison matrix:
+Extract 3-5 actionable directions as a comparison matrix:
 
 ```
-## Directions Comparison
-
 | Direction | Feasibility | Novelty | Impact | Risk | Key Sources |
 |-----------|-------------|---------|--------|------|-------------|
-| A: [name] | High/Med/Low | H/M/L  | H/M/L  | H/M/L | #3, #15    |
-| B: [name] | ...         | ...     | ...    | ...   | ...         |
-
-### Direction A: [Name]
-**Summary:** 1-2 sentences
-**Evidence:** What sources support this
-**Challenges:** What could go wrong
-**Recommendation:** When to choose this
-
-[Repeat for each direction]
 ```
 
-**MANDATORY USER CHECKPOINT:**
-```
-Which direction would you like me to crystallize into an actionable proposal?
-- A: [name]
-- B: [name]
-- C: [name]
-Or should I explore a different angle?
-```
+Then, for each: **Summary**, **Evidence**, **Challenges**, **Recommendation**.
 
-**Do NOT proceed to Phase 5 without user response.**
+**MANDATORY USER CHECKPOINT** — use `AskUserQuestion` to present the directions as selectable options
+(one option per direction, plus an "explore a different angle" path). **Do NOT proceed to Phase 5
+without the user's choice.**
 
 ## Phase 5: Actionable Crystallization
 
@@ -310,232 +327,121 @@ Structure the chosen direction:
 
 ```markdown
 # [Direction Title]
-
-## Problem Statement
-What problem this solves, grounded in research findings
-
-## Proposed Approach
-Specific methodology based on evidence gathered
-
-## Expected Outcomes
-Quantitative where possible, citing benchmark sources
-
+## Problem Statement       — grounded in research findings
+## Proposed Approach       — specific methodology from evidence
+## Expected Outcomes       — quantitative where possible, cite benchmark sources
 ## Technical Requirements
-What's needed to execute
-
-## Risks & Mitigations
-Based on challenges identified in research
-
-## Concrete First Steps
-1. Immediate action (this week)
-2. Short-term milestone
-3. Validation checkpoint
-
-## Key References
-[Numbered list of most relevant sources]
+## Risks & Mitigations      — based on challenges identified in research
+## Concrete First Steps     — this week / short-term milestone / validation checkpoint
+## Key References           — numbered list of most relevant sources
 ```
 
-## Phase 6: Claim Verification (Google AI Mode)
+## Phase 6: Claim Verification (native WebSearch/WebFetch)
 
-**MANDATORY: Verify major claims before finalizing research.**
+**MANDATORY: independently verify critical claims before finalizing.** This replaces the old
+google-ai-mode dependency with first-party search — no Python, no CAPTCHA.
 
-After crystallization, use the `google-ai-mode` skill to independently verify claims from your research. This phase has two tiers:
+1. **Extract ALL claims** from the crystallized proposal and write them to `.deep-research/<slug>/claims.md`.
+2. **Categorize by criticality:**
+   | Category | Definition | Verification |
+   |----------|------------|--------------|
+   | **Critical** | Proposal depends on it; if wrong, proposal fails | Always verify |
+   | **Important** | Strengthens proposal; affects confidence | User choice (Tier 2) |
+   | **Supporting** | Background context | User choice (Tier 2) |
 
-### Tier 1: Critical Claims (Automatic)
-
-Automatically verify the **most critical claims** that the proposal depends on.
-
-**Identify critical claims by asking:**
-- Does the proposed direction depend on this claim?
-- Is this a quantitative claim (percentages, benchmarks, metrics)?
-- Does this claim contradict other sources?
-- Would being wrong about this claim invalidate the proposal?
-
-**Process:**
-1. **Extract ALL claims** from the crystallized proposal
-2. **Categorize by criticality:** Critical / Important / Supporting
-3. **Auto-verify all Critical claims** (typically 5-15 claims)
-
-### Tier 2: Extended Verification (User Choice)
-
-After Tier 1, present remaining unverified claims and ask the user:
+### Tier 1: Critical claims (automatic, adversarial)
+For each critical claim, dispatch a **verifier agent** (`general-purpose`) — ideally several per claim,
+in parallel, each prompted to **try to REFUTE** the claim with independent sources. A claim survives
+only if a majority of verifiers fail to refute it and find corroborating evidence. Verifier prompt:
 
 ```
-## Verification Checkpoint
-
-### Tier 1 Complete: Critical Claims Verified
-- Verified: X claims
-- Confirmed: Y
-- Partially confirmed: Z
-- Contradicted: W
-
-### Remaining Unverified Claims (N total)
-
-**Important claims (not yet verified):**
-1. [Claim] - Source: #N
-2. [Claim] - Source: #N
-...
-
-**Supporting claims (lower priority):**
-1. [Claim] - Source: #N
-...
-
-### Options:
-- A: **Continue verification** - Verify Important claims (adds ~Y minutes)
-- B: **Deep verification** - Verify ALL remaining claims (adds ~Z minutes)
-- C: **Done** - Proceed with current verification (Critical claims only)
-- D: **Select specific claims** - Choose which claims to verify
-
-Which option would you like?
+Independently fact-check this claim using WebSearch + WebFetch. Try to REFUTE it.
+CLAIM: "[claim]"
+Find 2-4 independent sources (NOT [original source]). Prefer 2025-2026, authoritative.
+Return: verdict (Confirmed / Partially confirmed / Contradicted), the evidence with URLs,
+and any numeric discrepancy vs. the original claim.
 ```
 
-**Do NOT proceed without user response.**
+In a `Workflow`, pipeline this: each crystallized claim flows into N parallel refuters and a verdict
+schema, so verification of claim A runs while claim B is still being extracted.
 
-### Execution
+### Tier 2: Extended verification (user choice)
+After Tier 1, present remaining Important/Supporting claims and use `AskUserQuestion`:
+- **Continue** — verify Important claims
+- **Deep** — verify ALL remaining claims
+- **Done** — proceed with critical-only verification
+- **Select** — choose specific claims
 
-For each claim to verify, run:
-
-```bash
-cd ~/.claude/skills/google-ai-mode
-python scripts/run.py search.py --query "[Claim verification query] 2026" --save --debug
-```
-
-### Verification Query Template
-
-```
-"[Specific claim] [domain] [year] (evidence, studies, benchmarks, contradictions). Verify accuracy and provide sources."
-```
-
-### Examples
-
-| Claim to Verify | Verification Query |
-|-----------------|-------------------|
-| "D-PoSE achieves SOTA with 10x fewer params" | "D-PoSE hand pose estimation parameters SOTA 2025 (architecture, benchmark results, comparison). Verify performance claims." |
-| "MEgoHand reduces wrist error by 86.9%" | "MEgoHand egocentric hand pose wrist error reduction 2025 (methodology, results, depth integration). Verify accuracy." |
-| "Temporal consistency improves pose by 15.9%" | "TempCLR temporal hand pose improvement 2025 (benchmark, methodology, comparison). Verify claimed improvement." |
-
-### Output Format
-
+### Verification report
 ```markdown
 ## Claim Verification Report
-
-### Critical Claims (Tier 1 - Auto-verified)
-
-#### Claim 1: [Statement]
-- **Criticality:** Critical
-- **Original Source:** [#N from research]
-- **Google AI Verification:** ✅ Confirmed / ⚠️ Partially confirmed / ❌ Contradicted
-- **Evidence:** [Summary from Google AI with citations]
-- **Discrepancy:** [If any]
-- **Action:** [None / Update claim / Flag for user review]
-
-#### Claim 2: [Statement]
-...
-
-### Important Claims (Tier 2 - User-requested)
-[If user chose to continue verification]
-
+### Critical Claims (Tier 1 — auto-verified, adversarial)
+#### Claim 1: [statement]
+- Criticality: Critical | Original source: #N
+- Verdict: ✅ Confirmed / ⚠️ Partially confirmed / ❌ Contradicted
+- Evidence: [summary with independent URLs]
+- Discrepancy / Action: [update claim / flag for user / none]
 ### Summary
-- Total claims in proposal: N
-- Critical claims verified: X/X (100%)
-- Important claims verified: Y/Z (user choice)
-- Supporting claims verified: W/V (user choice)
-- Confirmed: A
-- Partially confirmed: B
-- Contradicted: C
-- Recommended updates: [List]
+- Total claims: N | Critical verified: X/X | Confirmed: A | Partial: B | Contradicted: C
+- Recommended updates: […]
 ```
 
-### Claim Categorization Guide
+**Checkpoint:** Do not finalize without (1) all critical claims verified and (2) a user decision on Tier 2.
 
-| Category | Definition | Verification |
-|----------|------------|--------------|
-| **Critical** | Proposal depends on it; if wrong, proposal fails | Always verify |
-| **Important** | Strengthens proposal; affects confidence level | User choice |
-| **Supporting** | Background context; nice-to-have accuracy | User choice |
+## Phase 7: Persist to Memory
 
-### Red Flags
+Make the research durable so future sessions recall it instead of redoing it.
 
-| Thought | Reality |
-|---------|---------|
-| "I trust my sources" | Independent verification catches errors and outdated info. |
-| "This is overkill" | One wrong critical claim undermines entire research credibility. |
-| "Google AI might be wrong" | Cross-reference both. If they disagree, investigate further. |
-| "I'll verify later" | Verify critical claims NOW. User can choose to verify more. |
-| "All claims are equally important" | No. Categorize by impact on the proposal. |
+1. **Write the full report** to the shared workspace as `.deep-research/<slug>/REPORT.md`
+   (synthesis + chosen direction + verification report + source table). Tell the user the path.
+2. **Save a memory file** in the project memory directory
+   (`<project>/memory/research-<slug>.md`) with frontmatter:
+   ```markdown
+   ---
+   name: research-<slug>
+   description: Deep-research report on <topic> — <one-line takeaway> (as of <date>)
+   metadata:
+     type: project
+   ---
+   <2-4 sentence summary of the chosen direction and its verification status.>
+   Full report: .deep-research/<slug>/REPORT.md. Sources: N. Critical claims verified: X/X.
+   ```
+3. **Add a one-line pointer to `MEMORY.md`:**
+   `- [Research: <topic>](memory/research-<slug>.md) — <hook>`
 
-**Checkpoint:** Do not finalize research without:
-1. All critical claims verified
-2. User decision on extended verification
+Before any new run, Phase 0a reads this index — so research compounds across sessions.
 
 ## Quick Reference
 
-| Phase | Output | Minimum | Checkpoint |
-|-------|--------|---------|------------|
-| 1. Decompose | Query list | 20 queries | List complete |
-| 2. Gather | Source table | **50 sources** | Count verified |
-| 3. Synthesize | Knowledge structure | All categories | Structure complete |
-| 4. Directions | Comparison matrix | 3-5 options | **User chooses** |
-| 5. Crystallize | Proposal | All sections | Ready for verification |
-| 6. Verify (Tier 1) | Critical claims report | **All critical claims** | Auto-verified |
-| 6. Verify (Tier 2) | Extended verification | User choice | **User decides scope** |
+| Phase | Output | Minimum | Checkpoint | Harness feature |
+|-------|--------|---------|------------|-----------------|
+| 0. Recall + Scope | Prior reports + scope | — | Scope agreed | `MEMORY.md`, `AskUserQuestion` |
+| 1. Decompose | Query list | 20 queries | List complete | — |
+| 2. Gather | Source table | **50 sources** | Count verified | `Workflow` / `Agent`, shared workspace |
+| 3. Synthesize | Knowledge structure | All categories | Structure complete | — |
+| 4. Directions | Comparison matrix | 3-5 options | **User chooses** | `AskUserQuestion` |
+| 5. Crystallize | Proposal | All sections | Ready to verify | — |
+| 6. Verify | Claim report | All critical | **User decides Tier 2** | `WebSearch`/`WebFetch` agents |
+| 7. Persist | Memory entry | Report + index | Saved | File-based memory |
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
-| Stopping at 10-15 sources | Dispatch more parallel agents until 50+ |
+| Stopping at 10-15 sources | Dispatch more parallel agents / re-run workflow until 50+ |
 | Skipping query decomposition | Write out all 20-50 queries BEFORE searching |
-| Sequential agent dispatch | ALL Task calls in ONE message, not separate |
-| Dispatching one agent first | Dispatch 5-10 agents simultaneously |
-| No user checkpoint | MUST pause at Phase 4 for direction choice |
+| Sequential agent dispatch | ALL Agent calls in ONE message, or use a Workflow |
+| Agents losing each other's work | Use the shared `.deep-research/<slug>/sources/` workspace |
+| No user checkpoint | MUST pause at Phase 4 (and Tier 2) with AskUserQuestion |
+| Trusting claims unverified | Adversarial WebSearch verification of all critical claims |
+| Research evaporates at session end | Persist to memory in Phase 7 |
 | Vague directions | Each direction needs evidence + tradeoffs |
-| Rushing synthesis | Take time to find contradictions and gaps |
-| Skipping source count | Explicitly count: "Sources gathered: N" |
-| Ad-hoc searching | Follow the phases in order |
+| Skipping source count | Explicitly state "Sources gathered: N" |
 
-## Skill Integration
+## Optional integrations (no longer required)
 
-### Required Installations (2 total)
-
-| Install | What You Get | GitHub |
-|---------|--------------|--------|
-| **superpowers plugin** | All superpowers skills (brainstorming, parallel-agents, writing-plans, etc.) | [obra/superpowers](https://github.com/obra/superpowers) |
-| **google-ai-mode skill** | Claim verification via Google AI search | [PleasePrompto/google-ai-mode-skill](https://github.com/PleasePrompto/google-ai-mode-skill) |
-
-### Skills Used From Superpowers Plugin
-
-| Skill | When | Purpose |
-|-------|------|---------|
-| `superpowers:brainstorming` | BEFORE this skill | Scope the research question |
-| `superpowers:dispatching-parallel-agents` | Phase 2 | Parallel agent dispatch |
-| `superpowers:writing-plans` | After Phase 6 (optional) | Create execution plan |
-
-**Note:** Install the superpowers plugin once → all skills above are automatically available.
-
-See [Prerequisites](#prerequisites) for installation commands.
-
-### Complete Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 0: superpowers:brainstorming (STRONGLY RECOMMENDED)       │
-│  Scope the question, identify constraints, define success       │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  PHASES 1-5: deep-research-discovery (THIS SKILL)               │
-│  Query decomposition → Parallel gathering → Synthesis →         │
-│  Direction identification → Crystallization                     │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  PHASE 6: google-ai-mode (CLAIM VERIFICATION)                   │
-│  Verify 5-10 key claims using Google AI search                  │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  OPTIONAL: superpowers:writing-plans                            │
-│  Convert verified proposal into execution plan                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+These were hard dependencies in v1 and are now **optional**:
+- **superpowers plugin** — if installed, `superpowers:writing-plans` can turn a verified proposal into
+  an execution plan. The native `Plan` agent type covers the same need.
+- **google-ai-mode skill** — only needed if you specifically want Google AI Mode search; native
+  `WebSearch`/`WebFetch` is the default and needs no setup.

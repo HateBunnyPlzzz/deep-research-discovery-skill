@@ -1,15 +1,24 @@
 # Deep Research Discovery
 
-A Claude Code skill for comprehensive research requiring **50+ sources minimum** through systematic parallel gathering, claim verification, and actionable direction synthesis.
+A Claude Code skill for comprehensive research requiring **50+ sources minimum** through systematic
+parallel gathering, adversarial claim verification, and actionable direction synthesis.
 
 **Core principle:** Breadth before depth. Gather comprehensively, verify claims, then narrow systematically.
 
+> **v2.0.0 — now native.** This skill no longer depends on the **superpowers** plugin or the
+> **google-ai-mode** Python skill. It runs entirely on first-party Claude Code capabilities:
+> the `Agent` tool, dynamic `Workflow`s, built-in `WebSearch`/`WebFetch`, `AskUserQuestion`, and the
+> file-based **memory** system. No plugins, no Python, no CAPTCHA.
+
 ## Features
 
-- **6-phase research process** with built-in checkpoints
-- **50+ source minimum** enforced through parallel agent dispatch
-- **Automatic claim verification** using Google AI search
-- **User decision points** before committing to directions
+- **8-phase research process** (Phase 0 recall+scope → Phase 7 persist) with built-in checkpoints
+- **50+ source minimum** enforced through parallel agent / workflow dispatch
+- **Shared agent memory** — dispatched agents collaborate via a shared `.deep-research/` workspace
+- **Dynamic workflows** — optional `Workflow` orchestration for deterministic fan-out + verify pipeline
+- **Adversarial claim verification** using native `WebSearch`/`WebFetch` (no external search skill)
+- **Persistent memory** — finished reports are saved so future sessions recall instead of re-researching
+- **User decision points** via `AskUserQuestion` before committing to directions
 - **Structured output** with citations and evidence
 
 ## Quick Start
@@ -17,58 +26,23 @@ A Claude Code skill for comprehensive research requiring **50+ sources minimum**
 ### Automated Installation (Recommended)
 
 ```bash
-# Clone the repo
 git clone https://github.com/HateBunnyPlzzz/deep-research-discovery-skill.git
-
-# Run the installer
 cd deep-research-discovery-skill
 ./install.sh
 ```
 
-The installer will:
-1. Check for all required dependencies
-2. Install missing components automatically
-3. Guide you through manual steps (for Claude Code plugins)
+The installer copies `SKILL.md` into `~/.claude/skills/deep-research-discovery/`. That's it — there are
+no other dependencies to install.
 
 ### Manual Installation
 
-If you prefer manual installation, follow these steps in order:
-
-#### Step 1: Install Superpowers Plugin (Required)
-
-**In Claude Code, run:**
-```
-/plugin marketplace add superpowers-marketplace/superpowers
-/plugin install superpowers@superpowers-marketplace
-```
-
-**GitHub:** https://github.com/obra/superpowers
-
-This single plugin includes ALL required superpowers skills:
-- `superpowers:brainstorming` - Scope research questions
-- `superpowers:dispatching-parallel-agents` - Parallel agent dispatch (Phase 2)
-- `superpowers:writing-plans` - Execution planning
-- And many more...
-
-**No need to install individual skills** - the plugin bundles everything.
-
-#### Step 2: Install Google AI Mode Skill (Required)
-
 ```bash
-git clone https://github.com/PleasePrompto/google-ai-mode-skill.git ~/.claude/skills/google-ai-mode
+git clone https://github.com/HateBunnyPlzzz/deep-research-discovery-skill.git \
+  ~/.claude/skills/deep-research-discovery
 ```
 
-**GitHub:** https://github.com/PleasePrompto/google-ai-mode-skill
+Or just the skill file:
 
-This provides claim verification in Phase 6.
-
-#### Step 3: Install Deep Research Discovery Skill
-
-```bash
-git clone https://github.com/HateBunnyPlzzz/deep-research-discovery-skill.git ~/.claude/skills/deep-research-discovery
-```
-
-Or manually:
 ```bash
 mkdir -p ~/.claude/skills/deep-research-discovery
 curl -o ~/.claude/skills/deep-research-discovery/SKILL.md \
@@ -77,117 +51,55 @@ curl -o ~/.claude/skills/deep-research-discovery/SKILL.md \
 
 ### Verify Installation
 
-Start a new Claude Code session and run:
+Start a **new** Claude Code session and run:
+
 ```
 /deep-research-discovery
 ```
-
-Claude should recognize and load the skill.
-
-## Installation Checklist
-
-- [ ] Superpowers plugin marketplace added (`/plugin marketplace add superpowers-marketplace/superpowers`)
-- [ ] Superpowers plugin installed (`/plugin install superpowers@superpowers-marketplace`)
-- [ ] Google AI Mode skill cloned to `~/.claude/skills/google-ai-mode/`
-- [ ] Deep Research Discovery skill in `~/.claude/skills/deep-research-discovery/`
-- [ ] New Claude Code session started
-- [ ] `/deep-research-discovery` command recognized
-
-## Dependencies
-
-| Dependency | Required | Purpose | Install |
-|------------|----------|---------|---------|
-| **superpowers plugin** | **Yes** | Provides brainstorming, parallel agents, writing-plans | One plugin install |
-| **google-ai-mode skill** | **Yes** | Claim verification in Phase 6 | Separate skill |
-
-### Skills Used (all included in superpowers plugin)
-
-| Skill | When Used | Purpose |
-|-------|-----------|---------|
-| `superpowers:brainstorming` | BEFORE this skill | Scope research question |
-| `superpowers:dispatching-parallel-agents` | Phase 2 | Parallel agent dispatch |
-| `superpowers:writing-plans` | After Phase 6 (optional) | Execution planning |
-
-**Install superpowers once → get all skills automatically.**
 
 ## Usage
 
-### Recommended Workflow
-
-**Always brainstorm before researching:**
+### Invoke directly
 
 ```
-1. /superpowers:brainstorming     →  Scope the research question first
-2. /deep-research-discovery       →  Gather 50+ sources + verify claims
-3. /superpowers:writing-plans     →  Create execution plan (optional)
+/deep-research-discovery [topic or question]
 ```
 
-**Why brainstorm first?** It clarifies what you actually need to research, prevents wasted effort, and identifies hidden assumptions.
+### Or just ask for research
 
-### Invoke Directly
-
-```
-/deep-research-discovery
-```
-
-### Or Ask for Research
-
-Claude will automatically use this skill when you request comprehensive research:
+Claude uses this skill automatically when you request comprehensive research:
 
 - "Research the current state of hand pose estimation"
 - "Survey the literature on transformer architectures"
-- "What are the best approaches for X in 2025?"
+- "What are the best approaches for X in 2026?"
 - "I need a comprehensive overview of [topic]"
 
 ## How It Works
 
-### The 6-Phase Process
+### The 8-phase process
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 1: Query Decomposition                                   │
-│  Generate 20-50 diverse search queries                          │
-│  Categories: foundational, SOTA, methods, comparisons,          │
-│              problems, applications, tools, key players         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 2: Parallel Source Gathering                             │
-│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐                       │
-│  │Agent│ │Agent│ │Agent│ │Agent│ │Agent│  5-10 agents          │
-│  │  1  │ │  2  │ │  3  │ │  4  │ │  5  │  in parallel          │
-│  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘                       │
-│  Uses: superpowers:dispatching-parallel-agents                  │
-│  Target: 50+ unique sources (MANDATORY)                         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 3: Content Synthesis                                     │
-│  Build knowledge structure from all sources                     │
-│  Identify contradictions, gaps, key players, breakthroughs      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 4: Direction Identification                              │
-│  Extract 3-5 actionable research directions                     │
-│  Comparison matrix: feasibility / novelty / impact / risk       │
-│  ⚠️  USER CHECKPOINT - You choose the direction                 │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 5: Actionable Crystallization                            │
-│  Detailed proposal for chosen direction                         │
-│  Concrete first steps + risk mitigations                        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 6: Claim Verification (Tiered)                           │
-│  Uses: google-ai-mode skill                                     │
-│  Tier 1: Auto-verify ALL critical claims                        │
-│  Tier 2: USER CHECKPOINT - Choose to verify more claims         │
-│          Options: Important claims / All claims / Done          │
-└─────────────────────────────────────────────────────────────────┘
+Phase 0  Recall + Scope        check MEMORY.md for prior research → AskUserQuestion to scope
+Phase 1  Query Decomposition   generate 20-50 diverse search queries
+Phase 2  Parallel Gathering    Workflow OR 5-10 parallel Agents → shared .deep-research/ workspace
+                               Target: 50+ unique sources (MANDATORY)
+Phase 3  Content Synthesis     build knowledge structure; surface contradictions & gaps
+Phase 4  Direction ID          3-5 directions + comparison matrix → ⚠️ USER CHECKPOINT
+Phase 5  Crystallization       detailed proposal for the chosen direction
+Phase 6  Claim Verification    adversarial WebSearch/WebFetch verifier agents (Tier 1 + Tier 2)
+Phase 7  Persist to Memory     save REPORT.md + a memory entry so future sessions recall it
 ```
+
+### Harness features used
+
+| Feature | Where | Purpose |
+|---------|-------|---------|
+| `Agent` tool (parallel subagents) | Phase 2, 6 | Concurrent source gathering & verification |
+| Dynamic `Workflow` | Phase 2, 6 | Deterministic fan-out + dedup/verify pipeline |
+| Shared agent memory (`.deep-research/`) | Phase 2-7 | Subagents collaborate via a shared workspace |
+| `WebSearch` / `WebFetch` | Phase 2, 6 | Native search & fetch (replaces google-ai-mode) |
+| `AskUserQuestion` | Phase 0, 4, 6 | Scoping and decision checkpoints |
+| File-based memory + `MEMORY.md` | Phase 0, 7 | Recall prior research; persist new reports |
 
 ### The Iron Laws
 
@@ -196,11 +108,9 @@ Claude will automatically use this skill when you request comprehensive research
 ┃  NO RESEARCH COMPLETE WITHOUT 50+ SOURCES  ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  NO CLAIMS ACCEPTED WITHOUT VERIFICATION   ┃
+┃  NO CRITICAL CLAIM ACCEPTED WITHOUT VERIFY ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
-
-No exceptions. This skill enforces comprehensive research with verified claims.
 
 ## When to Use
 
@@ -215,63 +125,50 @@ No exceptions. This skill enforces comprehensive research with verified claims.
 - Single-source answers
 - Implementation tasks
 
+## Optional integrations (no longer required)
+
+| Component | Status | Note |
+|-----------|--------|------|
+| superpowers plugin | Optional | `superpowers:writing-plans` can turn a verified proposal into a plan; the native `Plan` agent covers the same need. [obra/superpowers](https://github.com/obra/superpowers) |
+| google-ai-mode skill | Optional | Only if you specifically want Google AI Mode search; native `WebSearch`/`WebFetch` is the default. [PleasePrompto/google-ai-mode-skill](https://github.com/PleasePrompto/google-ai-mode-skill) |
+
 ## Troubleshooting
 
 ### "Skill not found"
-
-1. Verify the skill file exists: `ls ~/.claude/skills/deep-research-discovery/SKILL.md`
-2. Start a new Claude Code session
+1. Verify the file exists: `ls ~/.claude/skills/deep-research-discovery/SKILL.md`
+2. Start a **new** Claude Code session
 3. Try `/deep-research-discovery` again
 
-### "dispatching-parallel-agents not found"
-
-The superpowers plugin isn't installed. Run in Claude Code:
-```
-/plugin marketplace add superpowers-marketplace/superpowers
-/plugin install superpowers@superpowers-marketplace
-```
-
-### "google-ai-mode not found" / Verification phase fails
-
-The Google AI Mode skill isn't installed:
-```bash
-git clone https://github.com/PleasePrompto/google-ai-mode-skill.git ~/.claude/skills/google-ai-mode
-```
-
-### Google AI Mode CAPTCHA issues
-
-First-time setup may require solving a CAPTCHA:
-```bash
-cd ~/.claude/skills/google-ai-mode
-python scripts/run.py search.py --query "test query" --show-browser
-```
-Solve the CAPTCHA once, then future searches work automatically.
-
 ### Research stops before 50 sources
+This shouldn't happen — the skill enforces the 50+ minimum. If it does, remind Claude:
+"Continue gathering sources until you have 50+."
 
-This shouldn't happen — the skill enforces the 50+ source minimum. If it does, invoke the skill again and remind Claude: "Continue gathering sources until you have 50+."
+### Workflow won't run
+The `Workflow` tool requires user opt-in. Either say "use a workflow" / "ultracode", or let the skill
+fall back to hand-dispatched parallel `Agent` calls (Phase 2 — Agent mode) — both reach 50+ sources.
 
-## GitHub Repositories
+## Migrating from v1
 
-| Component | Repository |
-|-----------|------------|
-| Deep Research Discovery | [HateBunnyPlzzz/deep-research-discovery-skill](https://github.com/HateBunnyPlzzz/deep-research-discovery-skill) |
-| Superpowers Plugin | [obra/superpowers](https://github.com/obra/superpowers) |
-| Google AI Mode Skill | [PleasePrompto/google-ai-mode-skill](https://github.com/PleasePrompto/google-ai-mode-skill) |
+If you previously installed v1, you can remove the old dependencies (they're now optional):
+- The `google-ai-mode` skill is no longer used for verification.
+- The `superpowers` plugin is no longer required to dispatch agents.
+
+Re-run `./install.sh` (or re-clone) to get v2's `SKILL.md`, then start a new session.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+MIT License — see [LICENSE](LICENSE)
 
 ## Contributing
 
-Issues and PRs welcome. Please ensure any modifications maintain:
+Issues and PRs welcome. Please ensure modifications maintain:
 - The 50+ source requirement
-- The claim verification phase
+- The adversarial claim-verification phase
 - User checkpoints before direction selection
+- Persistence to memory
 
 ## Credits
 
-- **Superpowers** by [Jesse Vincent (obra)](https://github.com/obra)
-- **Google AI Mode** by [PleasePrompto](https://github.com/PleasePrompto)
-- Built for comprehensive research workflows in Claude Code
+- Built for comprehensive research workflows in Claude Code.
+- v1 integrations: **Superpowers** by [Jesse Vincent (obra)](https://github.com/obra),
+  **Google AI Mode** by [PleasePrompto](https://github.com/PleasePrompto).
